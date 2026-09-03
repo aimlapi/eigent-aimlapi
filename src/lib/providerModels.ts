@@ -36,6 +36,12 @@ type RawModel = {
     input?: string[] | null;
     output?: string[] | null;
   };
+  /**
+   * Endpoint surface this row describes, on listings that publish one
+   * row per surface (e.g. aimlapi.com). Absent on OpenRouter-shaped and
+   * plain OpenAI-shaped listings.
+   */
+  type?: string;
   context_length?: number;
   max_completion_tokens?: number;
 };
@@ -106,6 +112,36 @@ export function attributionHeadersForUrl(url: string): Record<string, string> {
   return { ...(ATTRIBUTION_HEADERS_BY_ORIGIN[origin] ?? {}) };
 }
 
+/**
+ * The one endpoint surface this client speaks. Everything below goes through
+ * `POST /chat/completions`.
+ */
+const CHAT_COMPLETIONS_SURFACE = 'openai/chat-completions';
+
+/**
+ * Decide whether a listing row describes an endpoint this client can call.
+ *
+ * A listing that publishes one row per endpoint surface names it in `type`
+ * (`openai/chat-completions`, `openai/responses/submit`, `anthropic/messages`,
+ * `openai/embeddings`, …). Only the chat-completions surface can serve us: a
+ * model published solely behind `openai/responses/submit` answers
+ * `404 Model not found` on `/chat/completions`, so offering it in the dropdown
+ * hands the user an id that cannot work. Verified live against aimlapi.com on
+ * 2026-09-03: `openai/gpt-5-2-pro` (responses-only) 404s, while
+ * `anthropic/claude-opus-5` — which also publishes a chat-completions row —
+ * answers 200.
+ *
+ * A surface name is recognised by its `<family>/<endpoint>` shape. Listings
+ * that do not describe surfaces at all (OpenRouter's, and the plain OpenAI
+ * `/v1/models` shape used by the other providers here) carry no `type`, or
+ * carry an unrelated single-word value, and are left untouched.
+ */
+function declaresNonChatEndpoint(model: RawModel): boolean {
+  const type = model.type;
+  if (typeof type !== 'string' || !type.includes('/')) return false;
+  return type !== CHAT_COMPLETIONS_SURFACE;
+}
+
 /** Split `anthropic/claude-opus-4.6` into `["anthropic", "claude-opus-4.6"]`. */
 function splitProviderPrefix(id: string): [string, string] {
   const idx = id.indexOf('/');
@@ -162,6 +198,7 @@ export async function fetchProviderModels(
   const seen = new Set<string>();
   for (const model of data) {
     if (!model?.id || !isChatCapable(model)) continue;
+    if (declaresNonChatEndpoint(model)) continue;
     if (seen.has(model.id)) continue;
     seen.add(model.id);
     const [provider] = splitProviderPrefix(model.id);
