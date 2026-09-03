@@ -13,6 +13,7 @@
 # ========= Copyright 2025-2026 @ Eigent.ai All Rights Reserved. =========
 
 from typing import Annotated, Final
+from urllib.parse import urlparse
 
 from pydantic import BeforeValidator
 
@@ -51,6 +52,55 @@ OPENAI_COMPATIBLE_MODEL_PLATFORM: Final[str] = "openai-compatible-model"
 AZURE_RESPONSES_REASONING_TOOL_MODEL_PREFIXES: Final[tuple[str, ...]] = (
     "gpt-5.6",
 )
+
+
+# Attribution headers for aimlapi.com. `HTTP-Referer` / `X-Title` follow the
+# OpenRouter convention and identify Eigent as the calling application; the two
+# `X-AIMLAPI-*` headers are read by aimlapi.com to attribute traffic to this
+# integration. They are keyed to the request host below so they can never ride
+# a request to a different vendor, or to a proxy that merely fronts the same
+# API.
+AIMLAPI_ATTRIBUTION_HOSTS: Final[frozenset[str]] = frozenset(
+    {"api.aimlapi.com"}
+)
+
+AIMLAPI_ATTRIBUTION_HEADERS: Final[dict[str, str]] = {
+    "HTTP-Referer": "https://github.com/eigent-ai/eigent",
+    "X-Title": "Eigent",
+    "X-AIMLAPI-Partner-ID": "part_eigent",
+    "X-AIMLAPI-Source": "agent/eigent",
+}
+
+
+def is_aimlapi_endpoint(api_url: object) -> bool:
+    """Return whether ``api_url`` points at aimlapi.com itself."""
+    if not isinstance(api_url, str):
+        return False
+    candidate = api_url.strip()
+    if not candidate:
+        return False
+    if "//" not in candidate:
+        candidate = "//" + candidate
+    host = urlparse(candidate).hostname
+    return bool(host) and host.lower() in AIMLAPI_ATTRIBUTION_HOSTS
+
+
+def aimlapi_attribution_headers(
+    api_url: object, default_headers: object = None
+) -> dict[str, str] | None:
+    """Merge aimlapi.com attribution into caller-supplied default headers.
+
+    Returns ``None`` when the request is not bound for aimlapi.com so callers
+    leave every other provider untouched. A caller's own header wins on a key
+    clash, and a new dict is built on each call so the module-level constant is
+    never mutated.
+    """
+    if not is_aimlapi_endpoint(api_url):
+        return None
+    caller_headers = (
+        default_headers if isinstance(default_headers, dict) else {}
+    )
+    return {**AIMLAPI_ATTRIBUTION_HEADERS, **caller_headers}
 
 
 def patch_bedrock_cloud_config(

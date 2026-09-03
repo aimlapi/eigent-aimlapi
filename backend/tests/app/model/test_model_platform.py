@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2025-2026 @ Eigent.ai All Rights Reserved. =========
 
+import re
+
 import httpx
 import pytest
 from camel.models import ModelFactory
@@ -20,8 +22,11 @@ from openai import AsyncOpenAI, BadRequestError
 from pydantic import BaseModel
 
 from app.model.model_platform import (
+    AIMLAPI_ATTRIBUTION_HEADERS,
     NormalizedModelPlatform,
     NormalizedOptionalModelPlatform,
+    aimlapi_attribution_headers,
+    is_aimlapi_endpoint,
     is_eigent_cloud_model_endpoint,
     normalize_model_platform,
     normalize_optional_model_platform,
@@ -37,6 +42,61 @@ def test_normalize_model_platform_maps_known_aliases():
     assert normalize_model_platform("llama.cpp") == "openai-compatible-model"
     assert normalize_model_platform("nebius") == "openai-compatible-model"
     assert normalize_model_platform("aimlapi") == "openai-compatible-model"
+
+
+def test_aimlapi_partner_id_matches_gateway_contract():
+    """A malformed partner id is dropped silently and earns nothing."""
+    assert re.fullmatch(
+        r"part_[A-Za-z0-9]{1,64}",
+        AIMLAPI_ATTRIBUTION_HEADERS["X-AIMLAPI-Partner-ID"],
+    )
+    assert re.fullmatch(
+        r"(web|agent|mcp)/[a-z0-9-]{1,32}",
+        AIMLAPI_ATTRIBUTION_HEADERS["X-AIMLAPI-Source"],
+    )
+
+
+def test_aimlapi_referer_and_title_identify_the_calling_app():
+    assert (
+        AIMLAPI_ATTRIBUTION_HEADERS["HTTP-Referer"]
+        == "https://github.com/eigent-ai/eigent"
+    )
+    assert AIMLAPI_ATTRIBUTION_HEADERS["X-Title"] == "Eigent"
+
+
+def test_is_aimlapi_endpoint_matches_host_not_substring():
+    assert is_aimlapi_endpoint("https://api.aimlapi.com/v1")
+    assert is_aimlapi_endpoint("api.aimlapi.com/v1")
+    assert not is_aimlapi_endpoint("https://api.aimlapi.com.evil.test/v1")
+    assert not is_aimlapi_endpoint("https://proxy.example.com/api.aimlapi.com")
+    assert not is_aimlapi_endpoint("https://openrouter.ai/api/v1")
+    assert not is_aimlapi_endpoint(None)
+    assert not is_aimlapi_endpoint("")
+
+
+def test_aimlapi_attribution_is_scoped_to_aimlapi_requests():
+    assert aimlapi_attribution_headers("https://api.openai.com/v1") is None
+    assert aimlapi_attribution_headers("https://openrouter.ai/api/v1") is None
+
+    headers = aimlapi_attribution_headers("https://api.aimlapi.com/v1")
+    assert headers == AIMLAPI_ATTRIBUTION_HEADERS
+
+
+def test_aimlapi_attribution_merges_and_never_mutates_the_constant():
+    original = dict(AIMLAPI_ATTRIBUTION_HEADERS)
+
+    headers = aimlapi_attribution_headers(
+        "https://api.aimlapi.com/v1",
+        {"X-Title": "user override", "X-Custom": "kept"},
+    )
+
+    # A caller's own headers survive, and win on a key clash.
+    assert headers["X-Custom"] == "kept"
+    assert headers["X-Title"] == "user override"
+    assert headers["X-AIMLAPI-Partner-ID"] == original["X-AIMLAPI-Partner-ID"]
+
+    headers["X-AIMLAPI-Partner-ID"] = "mutated"
+    assert AIMLAPI_ATTRIBUTION_HEADERS == original
 
 
 def test_normalize_model_platform_keeps_non_alias_unchanged():

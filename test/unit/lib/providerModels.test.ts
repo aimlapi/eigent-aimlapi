@@ -14,7 +14,10 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { fetchProviderModels } from '@/lib/providerModels';
+import {
+  attributionHeadersForUrl,
+  fetchProviderModels,
+} from '@/lib/providerModels';
 
 function mockModelsResponse(data: unknown[]) {
   const fetchMock = vi.fn(async () => ({
@@ -31,7 +34,64 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('attributionHeadersForUrl', () => {
+  it('sends a partner id the aimlapi.com gateway can parse', () => {
+    const headers = attributionHeadersForUrl('https://api.aimlapi.com/models');
+
+    // A malformed partner id is dropped silently by the gateway and earns
+    // nothing, so the shape is asserted rather than trusted.
+    expect(headers['X-AIMLAPI-Partner-ID']).toMatch(/^part_[A-Za-z0-9]{1,64}$/);
+    expect(headers['X-AIMLAPI-Source']).toMatch(
+      /^(web|agent|mcp)\/[a-z0-9-]{1,32}$/
+    );
+    // HTTP-Referer / X-Title identify Eigent, not the vendor.
+    expect(headers['HTTP-Referer']).toBe('https://github.com/eigent-ai/eigent');
+    expect(headers['X-Title']).toBe('Eigent');
+  });
+
+  it('never attaches attribution to another vendor or a look-alike host', () => {
+    expect(
+      attributionHeadersForUrl('https://openrouter.ai/api/v1/models')
+    ).toEqual({});
+    expect(
+      attributionHeadersForUrl('https://api.aimlapi.com.evil.test/models')
+    ).toEqual({});
+    expect(
+      attributionHeadersForUrl('https://proxy.example.com/api.aimlapi.com')
+    ).toEqual({});
+    expect(attributionHeadersForUrl('not a url')).toEqual({});
+  });
+
+  it('returns a fresh object so the shared table cannot be mutated', () => {
+    const first = attributionHeadersForUrl('https://api.aimlapi.com/models');
+    first['X-AIMLAPI-Partner-ID'] = 'mutated';
+
+    const second = attributionHeadersForUrl('https://api.aimlapi.com/models');
+    expect(second['X-AIMLAPI-Partner-ID']).not.toBe('mutated');
+  });
+});
+
 describe('fetchProviderModels', () => {
+  it('attaches attribution alongside the caller headers for aimlapi.com', async () => {
+    const fetchMock = mockModelsResponse([]);
+
+    await fetchProviderModels('https://api.aimlapi.com/v1', '/models', 'k');
+
+    const headers = (fetchMock.mock.calls[0] as any)[1].headers;
+    expect(headers.Authorization).toBe('Bearer k');
+    expect(headers.Accept).toBe('application/json');
+    expect(headers['X-AIMLAPI-Source']).toBe('agent/eigent');
+  });
+
+  it('leaves other providers request headers untouched', async () => {
+    const fetchMock = mockModelsResponse([]);
+
+    await fetchProviderModels('https://openrouter.ai/api/v1', '/models', 'k');
+
+    const headers = (fetchMock.mock.calls[0] as any)[1].headers;
+    expect(Object.keys(headers).sort()).toEqual(['Accept', 'Authorization']);
+  });
+
   it('keeps text-in / text-out models from a `modalities` listing', async () => {
     mockModelsResponse([
       {

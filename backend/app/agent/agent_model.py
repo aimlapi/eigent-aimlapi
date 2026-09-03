@@ -25,6 +25,7 @@ from camel.types import ModelPlatformType
 from app.agent.listen_chat_agent import ListenChatAgent, logger
 from app.model.chat import AgentModelConfig, Chat
 from app.model.model_platform import (
+    aimlapi_attribution_headers,
     azure_reasoning_tools_require_responses_api,
     is_eigent_cloud_model_endpoint,
     patch_azure_cloud_config,
@@ -415,6 +416,14 @@ def agent_model(
             stream_options = model_config.setdefault("stream_options", {})
             if isinstance(stream_options, dict):
                 stream_options.setdefault("include_usage", True)
+
+        # Attribution for aimlapi.com, keyed to that host so no other
+        # provider's request can carry it.
+        attribution_headers = aimlapi_attribution_headers(
+            effective_config["api_url"], init_params.get("default_headers")
+        )
+        if attribution_headers:
+            init_params["default_headers"] = attribution_headers
 
         model_backend = ModelFactory.create(
             model_platform=runtime_model_platform,

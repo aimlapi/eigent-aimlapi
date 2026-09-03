@@ -77,6 +77,35 @@ function isChatCapable(model: RawModel): boolean {
   return true;
 }
 
+/**
+ * Attribution headers keyed by request origin. `HTTP-Referer` / `X-Title`
+ * follow the OpenRouter convention and identify Eigent as the calling
+ * application; the `X-AIMLAPI-*` pair is read by aimlapi.com to attribute
+ * traffic to this integration. Keying on the resolved origin — rather than on
+ * the configured provider id — keeps one vendor's headers off another vendor's
+ * request, including a proxy that merely fronts the same API.
+ */
+const ATTRIBUTION_HEADERS_BY_ORIGIN: Record<string, Record<string, string>> = {
+  'https://api.aimlapi.com': {
+    'HTTP-Referer': 'https://github.com/eigent-ai/eigent',
+    'X-Title': 'Eigent',
+    'X-AIMLAPI-Partner-ID': 'part_eigent',
+    'X-AIMLAPI-Source': 'agent/eigent',
+  },
+};
+
+/** Attribution headers for `url`, or an empty object for unknown origins. */
+export function attributionHeadersForUrl(url: string): Record<string, string> {
+  let origin: string;
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    return {};
+  }
+  // Spread so the shared table is never handed out by reference.
+  return { ...(ATTRIBUTION_HEADERS_BY_ORIGIN[origin] ?? {}) };
+}
+
 /** Split `anthropic/claude-opus-4.6` into `["anthropic", "claude-opus-4.6"]`. */
 function splitProviderPrefix(id: string): [string, string] {
   const idx = id.indexOf('/');
@@ -111,6 +140,7 @@ export async function fetchProviderModels(
     headers: {
       Authorization: `Bearer ${apiKey}`,
       Accept: 'application/json',
+      ...attributionHeadersForUrl(url),
     },
   });
 
