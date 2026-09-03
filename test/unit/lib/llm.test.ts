@@ -39,4 +39,8 @@ describe('INIT_PROVODERS', () => {
       websiteUrl: 'https://aimlapi.com',
     });
   });
+
+  it('lists aimlapi.com first in the hand-ordered provider list', () => {
+    expect(INIT_PROVODERS[0]?.id).toBe('aimlapi');
+  });
 });
