@@ -207,6 +207,11 @@ class TestModelPlatformMapping:
         chat = self._create_chat("ant-ling")
         assert chat.model_platform == "openai-compatible-model"
 
+    def test_chat_maps_aimlapi_to_openai_compatible_model(self):
+        """Test Chat maps aimlapi.com platform alias correctly."""
+        chat = self._create_chat("aimlapi")
+        assert chat.model_platform == "openai-compatible-model"
+
     def test_chat_keeps_supported_platforms_unchanged(self):
         """Test Chat keeps native camel-ai platforms unchanged."""
         chat = self._create_chat("mistral")

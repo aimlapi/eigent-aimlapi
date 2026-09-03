@@ -255,6 +255,20 @@ export const INIT_PROVODERS: Provider[] = [
     websiteUrl: 'https://developer.ant-ling.com',
   },
   {
+    id: 'aimlapi',
+    name: 'aimlapi.com',
+    apiKey: '',
+    apiHost: 'https://api.aimlapi.com/v1',
+    description: 'AI/ML API model configuration.',
+    is_valid: false,
+    model_type: '',
+    // `include=all` is what adds the `modalities` block; without it the
+    // listing is 785 undifferentiated entries, image and speech models
+    // included.
+    modelsEndpoint: '/models?include=all',
+    websiteUrl: 'https://aimlapi.com',
+  },
+  {
     id: 'openai-compatible-model',
     name: 'OpenAI Compatible',
     apiKey: '',

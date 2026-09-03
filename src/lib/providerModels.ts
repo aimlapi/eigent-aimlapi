@@ -28,6 +28,14 @@ type RawModel = {
     input_modalities?: string[] | null;
     output_modalities?: string[] | null;
   };
+  /**
+   * Alternative modality shape used by listings that do not publish
+   * OpenRouter's `architecture` object (e.g. aimlapi.com).
+   */
+  modalities?: {
+    input?: string[] | null;
+    output?: string[] | null;
+  };
   context_length?: number;
   max_completion_tokens?: number;
 };
@@ -45,18 +53,28 @@ export type ProviderModelGroup = {
 
 /**
  * Decide whether a model is chat-capable enough to surface in the dropdown.
- * Keeps models that explicitly emit text, plus models that omit the
- * architecture field entirely (some upstream listings — e.g. deepseek-reasoner
+ * Keeps models that explicitly emit text, plus models that declare no
+ * modality metadata at all (some upstream listings — e.g. deepseek-reasoner
  * — leave it null even though they are usable for chat).
  *
- * Filters out: TTS / image-only / video-only outputs.
+ * Filters out: TTS / image-only / video-only outputs, and — for listings that
+ * use the `modalities` shape — transcription / OCR entries that emit text but
+ * cannot accept a text prompt.
  */
 function isChatCapable(model: RawModel): boolean {
   const arch = model.architecture;
-  if (!arch) return true;
-  const out = arch.output_modalities;
-  if (out == null) return true;
-  return out.includes('text');
+  if (arch) {
+    const out = arch.output_modalities;
+    if (out == null) return true;
+    return out.includes('text');
+  }
+
+  const modalities = model.modalities;
+  if (!modalities) return true;
+  const { input, output } = modalities;
+  if (output != null && !output.includes('text')) return false;
+  if (input != null && !input.includes('text')) return false;
+  return true;
 }
 
 /** Split `anthropic/claude-opus-4.6` into `["anthropic", "claude-opus-4.6"]`. */
@@ -109,8 +127,13 @@ export async function fetchProviderModels(
   const data: RawModel[] = Array.isArray(payload?.data) ? payload.data : [];
 
   const grouped = new Map<string, ProviderModelInfo[]>();
+  // One id can be listed several times when a provider publishes the same
+  // model under more than one endpoint surface; the dropdown must show it once.
+  const seen = new Set<string>();
   for (const model of data) {
     if (!model?.id || !isChatCapable(model)) continue;
+    if (seen.has(model.id)) continue;
+    seen.add(model.id);
     const [provider] = splitProviderPrefix(model.id);
     const bucket = provider || 'other';
     const info: ProviderModelInfo = {

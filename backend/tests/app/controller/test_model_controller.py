@@ -52,6 +52,15 @@ class TestModelControllerEnhanced:
         )
         assert request_data.model_platform == "openai-compatible-model"
 
+    def test_validate_model_request_maps_aimlapi_alias(self):
+        """Test request model maps aimlapi alias to openai-compatible-model."""
+        request_data = ValidateModelRequest(
+            model_platform="aimlapi",
+            model_type="openai/gpt-4o-mini",
+            api_key="test_key",
+        )
+        assert request_data.model_platform == "openai-compatible-model"
+
     def test_validate_model_request_keeps_supported_platforms_unchanged(self):
         """Test request model keeps native camel-ai platforms unchanged."""
         request_data = ValidateModelRequest(

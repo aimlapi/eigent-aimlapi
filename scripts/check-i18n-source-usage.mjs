@@ -89,6 +89,7 @@ const NATIVE_LANGUAGE_LABELS = [
 ];
 
 const PROVIDER_METADATA_DESCRIPTIONS = [
+  'AI/ML API model configuration.',
   'Codex subscription model configuration.',
   'Google Gemini model configuration.',
   'OpenAI model configuration.',

@@ -83,6 +83,7 @@ export const LOCAL_MODEL_OPTIONS: LocalModelOption[] = [
 
 // Provider logos that use dark fills (black or currentColor) and need inversion in dark mode
 export const DARK_FILL_MODELS = new Set([
+  'aimlapi',
   'openai',
   'anthropic',
   'moonshot',
