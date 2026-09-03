@@ -67,7 +67,7 @@ AIMLAPI_ATTRIBUTION_HOSTS: Final[frozenset[str]] = frozenset(
 AIMLAPI_ATTRIBUTION_HEADERS: Final[dict[str, str]] = {
     "HTTP-Referer": "https://github.com/eigent-ai/eigent",
     "X-Title": "Eigent",
-    "X-AIMLAPI-Partner-ID": "part_eigent",
+    "X-AIMLAPI-Partner-ID": "part_kK5bWvwrYl5A9aWdwLFoIBQV",
     "X-AIMLAPI-Source": "agent/eigent",
 }
 

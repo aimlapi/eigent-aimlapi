@@ -192,7 +192,7 @@ class TestAgentFactoryFunctions:
 
         assert kwargs["model_platform"] == "openai-compatible-model"
         headers = kwargs["default_headers"]
-        assert headers["X-AIMLAPI-Partner-ID"] == "part_eigent"
+        assert headers["X-AIMLAPI-Partner-ID"] == "part_kK5bWvwrYl5A9aWdwLFoIBQV"
         assert headers["X-AIMLAPI-Source"] == "agent/eigent"
         assert headers["HTTP-Referer"] == "https://github.com/eigent-ai/eigent"
         assert headers["X-Title"] == "Eigent"
@@ -224,7 +224,7 @@ class TestAgentFactoryFunctions:
 
         headers = kwargs["default_headers"]
         assert headers["X-Team"] == "platform"
-        assert headers["X-AIMLAPI-Partner-ID"] == "part_eigent"
+        assert headers["X-AIMLAPI-Partner-ID"] == "part_kK5bWvwrYl5A9aWdwLFoIBQV"
 
     def test_unset_request_fields_are_omitted_not_sent_as_null(
         self, sample_chat_data

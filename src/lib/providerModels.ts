@@ -95,7 +95,7 @@ const ATTRIBUTION_HEADERS_BY_ORIGIN: Record<string, Record<string, string>> = {
   'https://api.aimlapi.com': {
     'HTTP-Referer': 'https://github.com/eigent-ai/eigent',
     'X-Title': 'Eigent',
-    'X-AIMLAPI-Partner-ID': 'part_eigent',
+    'X-AIMLAPI-Partner-ID': 'part_kK5bWvwrYl5A9aWdwLFoIBQV',
     'X-AIMLAPI-Source': 'agent/eigent',
   },
 };
