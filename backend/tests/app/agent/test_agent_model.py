@@ -155,6 +155,114 @@ class TestAgentFactoryFunctions:
         assert kwargs["model_config_dict"]["store"] is False
         assert kwargs["default_headers"]["originator"] == "codex_cli_rs"
 
+    def _create_model_via_agent_model(self, sample_chat_data, **overrides):
+        """Run agent_model with ModelFactory mocked and return its kwargs."""
+        options = Chat(**{**sample_chat_data, **overrides})
+
+        from app.service.task import task_locks
+
+        mock_task_lock = MagicMock()
+        task_locks[options.task_id] = mock_task_lock
+        mock_task_lock.put_queue = AsyncMock()
+
+        _m = sys.modules["app.agent.agent_model"]
+        with (
+            patch.object(_m, "ListenChatAgent"),
+            patch.object(_m, "ModelFactory") as mock_model_factory,
+            patch.object(_m, "get_task_lock", return_value=mock_task_lock),
+            patch("asyncio.create_task"),
+        ):
+            mock_model_factory.create.return_value = MagicMock()
+            agent_model("TestAgent", "You are helpful", options, [])
+
+        _, kwargs = mock_model_factory.create.call_args
+        return kwargs
+
+    def test_aimlapi_request_carries_attribution_headers(
+        self, sample_chat_data
+    ):
+        """aimlapi.com traffic must be attributable to this integration."""
+        kwargs = self._create_model_via_agent_model(
+            sample_chat_data,
+            model_platform="aimlapi",
+            model_type="openai/gpt-4o-mini",
+            api_key="test-key",
+            api_url="https://api.aimlapi.com/v1",
+        )
+
+        assert kwargs["model_platform"] == "openai-compatible-model"
+        headers = kwargs["default_headers"]
+        assert headers["X-AIMLAPI-Partner-ID"] == "part_kK5bWvwrYl5A9aWdwLFoIBQV"
+        assert headers["X-AIMLAPI-Source"] == "agent/eigent"
+        assert headers["HTTP-Referer"] == "https://github.com/eigent-ai/eigent"
+        assert headers["X-Title"] == "Eigent"
+
+    def test_attribution_headers_stay_off_other_providers(
+        self, sample_chat_data
+    ):
+        """Another vendor's request must never carry aimlapi attribution."""
+        kwargs = self._create_model_via_agent_model(
+            sample_chat_data,
+            model_platform="openai",
+            model_type="gpt-4o",
+            api_url="https://api.openai.com/v1",
+        )
+
+        assert "default_headers" not in kwargs
+
+    def test_user_default_headers_survive_attribution_merge(
+        self, sample_chat_data
+    ):
+        """Attribution merges into user headers, it does not replace them."""
+        kwargs = self._create_model_via_agent_model(
+            sample_chat_data,
+            model_platform="aimlapi",
+            model_type="openai/gpt-4o-mini",
+            api_url="https://api.aimlapi.com/v1",
+            extra_params={"default_headers": {"X-Team": "platform"}},
+        )
+
+        headers = kwargs["default_headers"]
+        assert headers["X-Team"] == "platform"
+        assert headers["X-AIMLAPI-Partner-ID"] == "part_kK5bWvwrYl5A9aWdwLFoIBQV"
+
+    def test_unset_request_fields_are_omitted_not_sent_as_null(
+        self, sample_chat_data
+    ):
+        """An unset optional must be omitted, never serialised as null.
+
+        OpenAI-compatible gateways type-check these fields and reject a
+        literal null with a 400, so a client that forwards `None` for an
+        option the user never set breaks every request while a mocked test
+        suite stays green. Assert on the config that is actually handed to
+        the model client.
+        """
+        null_rejecting_fields = (
+            "temperature",
+            "top_p",
+            "seed",
+            "tools",
+            "tool_choice",
+            "response_format",
+            "stream",
+            "stream_options",
+            "parallel_tool_calls",
+            "max_tokens",
+            "max_completion_tokens",
+        )
+        kwargs = self._create_model_via_agent_model(
+            sample_chat_data,
+            model_platform="aimlapi",
+            model_type="openai/gpt-4o-mini",
+            api_url="https://api.aimlapi.com/v1",
+            extra_params=dict.fromkeys(null_rejecting_fields),
+        )
+
+        model_config = kwargs["model_config_dict"] or {}
+        assert not [k for k, v in model_config.items() if v is None]
+        for field in null_rejecting_fields:
+            assert field not in model_config
+
     def test_non_codex_model_does_not_inherit_subscription_runtime_params(
         self, sample_chat_data
     ):

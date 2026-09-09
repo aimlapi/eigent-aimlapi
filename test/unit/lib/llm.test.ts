@@ -27,4 +27,20 @@ describe('INIT_PROVODERS', () => {
       websiteUrl: 'https://docs.tokenfactory.nebius.com/quickstart',
     });
   });
+
+  it('includes aimlapi.com as an OpenAI-compatible BYOK provider', () => {
+    const provider = INIT_PROVODERS.find((item) => item.id === 'aimlapi');
+
+    expect(provider).toMatchObject({
+      // The user-facing label is the vendor's own product name.
+      name: 'aimlapi.com',
+      apiHost: 'https://api.aimlapi.com/v1',
+      modelsEndpoint: '/models?include=all',
+      websiteUrl: 'https://aimlapi.com',
+    });
+  });
+
+  it('lists aimlapi.com first in the hand-ordered provider list', () => {
+    expect(INIT_PROVODERS[0]?.id).toBe('aimlapi');
+  });
 });

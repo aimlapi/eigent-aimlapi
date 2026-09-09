@@ -28,6 +28,20 @@ type RawModel = {
     input_modalities?: string[] | null;
     output_modalities?: string[] | null;
   };
+  /**
+   * Alternative modality shape used by listings that do not publish
+   * OpenRouter's `architecture` object (e.g. aimlapi.com).
+   */
+  modalities?: {
+    input?: string[] | null;
+    output?: string[] | null;
+  };
+  /**
+   * Endpoint surface this row describes, on listings that publish one
+   * row per surface (e.g. aimlapi.com). Absent on OpenRouter-shaped and
+   * plain OpenAI-shaped listings.
+   */
+  type?: string;
   context_length?: number;
   max_completion_tokens?: number;
 };
@@ -45,18 +59,87 @@ export type ProviderModelGroup = {
 
 /**
  * Decide whether a model is chat-capable enough to surface in the dropdown.
- * Keeps models that explicitly emit text, plus models that omit the
- * architecture field entirely (some upstream listings — e.g. deepseek-reasoner
+ * Keeps models that explicitly emit text, plus models that declare no
+ * modality metadata at all (some upstream listings — e.g. deepseek-reasoner
  * — leave it null even though they are usable for chat).
  *
- * Filters out: TTS / image-only / video-only outputs.
+ * Filters out: TTS / image-only / video-only outputs, and — for listings that
+ * use the `modalities` shape — transcription / OCR entries that emit text but
+ * cannot accept a text prompt.
  */
 function isChatCapable(model: RawModel): boolean {
   const arch = model.architecture;
-  if (!arch) return true;
-  const out = arch.output_modalities;
-  if (out == null) return true;
-  return out.includes('text');
+  if (arch) {
+    const out = arch.output_modalities;
+    if (out == null) return true;
+    return out.includes('text');
+  }
+
+  const modalities = model.modalities;
+  if (!modalities) return true;
+  const { input, output } = modalities;
+  if (output != null && !output.includes('text')) return false;
+  if (input != null && !input.includes('text')) return false;
+  return true;
+}
+
+/**
+ * Attribution headers keyed by request origin. `HTTP-Referer` / `X-Title`
+ * follow the OpenRouter convention and identify Eigent as the calling
+ * application; the `X-AIMLAPI-*` pair is read by aimlapi.com to attribute
+ * traffic to this integration. Keying on the resolved origin — rather than on
+ * the configured provider id — keeps one vendor's headers off another vendor's
+ * request, including a proxy that merely fronts the same API.
+ */
+const ATTRIBUTION_HEADERS_BY_ORIGIN: Record<string, Record<string, string>> = {
+  'https://api.aimlapi.com': {
+    'HTTP-Referer': 'https://github.com/eigent-ai/eigent',
+    'X-Title': 'Eigent',
+    'X-AIMLAPI-Partner-ID': 'part_kK5bWvwrYl5A9aWdwLFoIBQV',
+    'X-AIMLAPI-Source': 'agent/eigent',
+  },
+};
+
+/** Attribution headers for `url`, or an empty object for unknown origins. */
+export function attributionHeadersForUrl(url: string): Record<string, string> {
+  let origin: string;
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    return {};
+  }
+  // Spread so the shared table is never handed out by reference.
+  return { ...(ATTRIBUTION_HEADERS_BY_ORIGIN[origin] ?? {}) };
+}
+
+/**
+ * The one endpoint surface this client speaks. Everything below goes through
+ * `POST /chat/completions`.
+ */
+const CHAT_COMPLETIONS_SURFACE = 'openai/chat-completions';
+
+/**
+ * Decide whether a listing row describes an endpoint this client can call.
+ *
+ * A listing that publishes one row per endpoint surface names it in `type`
+ * (`openai/chat-completions`, `openai/responses/submit`, `anthropic/messages`,
+ * `openai/embeddings`, …). Only the chat-completions surface can serve us: a
+ * model published solely behind `openai/responses/submit` answers
+ * `404 Model not found` on `/chat/completions`, so offering it in the dropdown
+ * hands the user an id that cannot work. Verified live against aimlapi.com on
+ * 2026-09-03: `openai/gpt-5-2-pro` (responses-only) 404s, while
+ * `anthropic/claude-opus-5` — which also publishes a chat-completions row —
+ * answers 200.
+ *
+ * A surface name is recognised by its `<family>/<endpoint>` shape. Listings
+ * that do not describe surfaces at all (OpenRouter's, and the plain OpenAI
+ * `/v1/models` shape used by the other providers here) carry no `type`, or
+ * carry an unrelated single-word value, and are left untouched.
+ */
+function declaresNonChatEndpoint(model: RawModel): boolean {
+  const type = model.type;
+  if (typeof type !== 'string' || !type.includes('/')) return false;
+  return type !== CHAT_COMPLETIONS_SURFACE;
 }
 
 /** Split `anthropic/claude-opus-4.6` into `["anthropic", "claude-opus-4.6"]`. */
@@ -93,6 +176,7 @@ export async function fetchProviderModels(
     headers: {
       Authorization: `Bearer ${apiKey}`,
       Accept: 'application/json',
+      ...attributionHeadersForUrl(url),
     },
   });
 
@@ -109,8 +193,14 @@ export async function fetchProviderModels(
   const data: RawModel[] = Array.isArray(payload?.data) ? payload.data : [];
 
   const grouped = new Map<string, ProviderModelInfo[]>();
+  // One id can be listed several times when a provider publishes the same
+  // model under more than one endpoint surface; the dropdown must show it once.
+  const seen = new Set<string>();
   for (const model of data) {
     if (!model?.id || !isChatCapable(model)) continue;
+    if (declaresNonChatEndpoint(model)) continue;
+    if (seen.has(model.id)) continue;
+    seen.add(model.id);
     const [provider] = splitProviderPrefix(model.id);
     const bucket = provider || 'other';
     const info: ProviderModelInfo = {

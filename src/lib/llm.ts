@@ -29,6 +29,20 @@ const CODEX_SUBSCRIPTION_PROVIDER: Provider = {
 
 export const INIT_PROVODERS: Provider[] = [
   {
+    id: 'aimlapi',
+    name: 'aimlapi.com',
+    apiKey: '',
+    apiHost: 'https://api.aimlapi.com/v1',
+    description: 'AI/ML API model configuration.',
+    is_valid: false,
+    model_type: '',
+    // `include=all` is what adds the `modalities` block; without it the
+    // listing is 785 undifferentiated entries, image and speech models
+    // included.
+    modelsEndpoint: '/models?include=all',
+    websiteUrl: 'https://aimlapi.com',
+  },
+  {
     id: 'gemini',
     name: 'Gemini',
     apiKey: '',

@@ -19,7 +19,10 @@ from typing import Any
 from camel.agents import ChatAgent
 from camel.models import ModelFactory, ModelProcessingError
 
-from app.model.model_platform import BEDROCK_CONVERSE_REGION
+from app.model.model_platform import (
+    BEDROCK_CONVERSE_REGION,
+    aimlapi_attribution_headers,
+)
 
 logger = logging.getLogger("model_validation")
 
@@ -235,6 +238,11 @@ def create_agent(
             model_config_dict["max_tokens"] = 4096
     if str(platform).lower() == "aws-bedrock-converse":
         kwargs.setdefault("region_name", BEDROCK_CONVERSE_REGION)
+    attribution_headers = aimlapi_attribution_headers(
+        url, kwargs.get("default_headers")
+    )
+    if attribution_headers:
+        kwargs["default_headers"] = attribution_headers
     model = ModelFactory.create(
         model_platform=platform,
         model_type=mtype,
@@ -340,6 +348,11 @@ def validate_model_with_details(
                 model_config_dict["max_tokens"] = 4096
         if str(model_platform).lower() == "aws-bedrock-converse":
             kwargs.setdefault("region_name", BEDROCK_CONVERSE_REGION)
+        attribution_headers = aimlapi_attribution_headers(
+            url, kwargs.get("default_headers")
+        )
+        if attribution_headers:
+            kwargs["default_headers"] = attribution_headers
         model = ModelFactory.create(
             model_platform=model_platform,
             model_type=model_type,
