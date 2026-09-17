@@ -19,9 +19,17 @@ from typing import Any
 from camel.agents import ChatAgent
 from camel.models import ModelFactory, ModelProcessingError
 
+from app.model.effort import resolve_model_effort_config
 from app.model.model_platform import (
     BEDROCK_CONVERSE_REGION,
     aimlapi_attribution_headers,
+    is_eigent_cloud_model_endpoint,
+    resolve_cloud_model_runtime_platform,
+)
+from app.model.responses_input import configure_responses_input
+from app.workspace_config.models import (
+    ModelCapabilityConfigError,
+    UnsupportedThinkingEffortError,
 )
 
 logger = logging.getLogger("model_validation")
@@ -149,6 +157,10 @@ def categorize_error(
     Returns:
         ValidationErrorType: The categorized error type, or UNKNOWN_ERROR if uncertain
     """
+    if isinstance(
+        exception, (ModelCapabilityConfigError, UnsupportedThinkingEffortError)
+    ):
+        return ValidationErrorType.INVALID_CONFIGURATION
     error_str = str(exception).lower()
     error_type = exception.__class__.__name__.lower()
     exception_type_str = str(type(exception)).lower()
@@ -201,6 +213,45 @@ def categorize_error(
     return ValidationErrorType.UNKNOWN_ERROR
 
 
+def _validation_effort_config(
+    model_platform: str,
+    model_type: str,
+    url: str | None,
+    model_config_dict: dict | None,
+    kwargs: dict,
+) -> tuple[dict | None, dict, str]:
+    init_params = dict(kwargs)
+    config, transport = resolve_model_effort_config(
+        model_platform=model_platform,
+        model_type=model_type,
+        model_config=model_config_dict or {},
+        api_mode=init_params.get("api_mode"),
+        provider_override=init_params.pop("model_capability", None),
+        has_function_tools=True,
+        is_cloud=is_eigent_cloud_model_endpoint(url),
+    )
+    if transport == "responses" or "api_mode" in init_params:
+        init_params["api_mode"] = transport
+    runtime_platform = resolve_cloud_model_runtime_platform(
+        model_platform=model_platform,
+        api_url=url,
+        api_mode=transport,
+    )
+    if runtime_platform != model_platform:
+        for key in (
+            "api_version",
+            "azure_ad_token",
+            "azure_ad_token_provider",
+            "azure_deployment_name",
+        ):
+            init_params.pop(key, None)
+    return (
+        (config if config or model_config_dict is not None else None),
+        init_params,
+        runtime_platform,
+    )
+
+
 def create_agent(
     model_platform: str,
     model_type: str,
@@ -238,13 +289,20 @@ def create_agent(
             model_config_dict["max_tokens"] = 4096
     if str(platform).lower() == "aws-bedrock-converse":
         kwargs.setdefault("region_name", BEDROCK_CONVERSE_REGION)
+    model_config_dict, kwargs, runtime_platform = _validation_effort_config(
+        platform,
+        mtype,
+        url,
+        model_config_dict,
+        kwargs,
+    )
     attribution_headers = aimlapi_attribution_headers(
         url, kwargs.get("default_headers")
     )
     if attribution_headers:
         kwargs["default_headers"] = attribution_headers
     model = ModelFactory.create(
-        model_platform=platform,
+        model_platform=runtime_platform,
         model_type=mtype,
         api_key=api_key,
         url=url,
@@ -252,6 +310,7 @@ def create_agent(
         model_config_dict=model_config_dict,
         **kwargs,
     )
+    configure_responses_input(model)
     agent = ChatAgent(
         system_message="You are a helpful assistant that must use the tool get_website_content to get the content of a website.",
         model=model,
@@ -348,13 +407,22 @@ def validate_model_with_details(
                 model_config_dict["max_tokens"] = 4096
         if str(model_platform).lower() == "aws-bedrock-converse":
             kwargs.setdefault("region_name", BEDROCK_CONVERSE_REGION)
+        model_config_dict, kwargs, runtime_platform = (
+            _validation_effort_config(
+                model_platform,
+                model_type,
+                url,
+                model_config_dict,
+                kwargs,
+            )
+        )
         attribution_headers = aimlapi_attribution_headers(
             url, kwargs.get("default_headers")
         )
         if attribution_headers:
             kwargs["default_headers"] = attribution_headers
         model = ModelFactory.create(
-            model_platform=model_platform,
+            model_platform=runtime_platform,
             model_type=model_type,
             api_key=api_key,
             url=url,
@@ -362,6 +430,7 @@ def validate_model_with_details(
             model_config_dict=model_config_dict,
             **kwargs,
         )
+        configure_responses_input(model)
         result.validation_stages[ValidationStage.MODEL_CREATION] = True
         result.successful_stages.append(ValidationStage.MODEL_CREATION)
         result.diagnostic_info["model_creation"] = {

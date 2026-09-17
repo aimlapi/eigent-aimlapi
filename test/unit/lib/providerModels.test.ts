@@ -12,88 +12,61 @@
 // limitations under the License.
 // ========= Copyright 2025-2026 @ Eigent.ai All Rights Reserved. =========
 
+import { fetchProviderModels } from '@/lib/providerModels';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  attributionHeadersForUrl,
-  fetchProviderModels,
-} from '@/lib/providerModels';
+const mocks = vi.hoisted(() => ({ fetchPost: vi.fn() }));
 
-function mockModelsResponse(data: unknown[]) {
-  const fetchMock = vi.fn(async () => ({
-    ok: true,
-    status: 200,
-    statusText: 'OK',
-    json: async () => ({ object: 'list', data }),
-  }));
-  vi.stubGlobal('fetch', fetchMock);
-  return fetchMock;
-}
+vi.mock('@/api/http', () => ({ fetchPost: mocks.fetchPost }));
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
+afterEach(() => mocks.fetchPost.mockReset());
 
-describe('attributionHeadersForUrl', () => {
-  it('sends a partner id the aimlapi.com gateway can parse', () => {
-    const headers = attributionHeadersForUrl('https://api.aimlapi.com/models');
+describe('fetchProviderModels errors', () => {
+  it.each([
+    [401, 'Invalid API key. Check your API key and click Refresh again.'],
+    [
+      403,
+      'Access denied. Check your API key permissions and account access, then click Refresh again.',
+    ],
+    [
+      500,
+      'Could not load models. Check your connection and API host, then click Refresh again.',
+    ],
+  ])(
+    'explains HTTP %s without exposing credentials',
+    async (status, message) => {
+      mocks.fetchPost.mockRejectedValue(
+        Object.assign(new Error('backend error'), { status })
+      );
+      await expect(
+        fetchProviderModels('https://example.com/v1', '/models', 'bad-key')
+      ).rejects.toThrow(message);
+    }
+  );
 
-    // A malformed partner id is dropped silently by the gateway and earns
-    // nothing, so the shape is asserted rather than trusted.
-    expect(headers['X-AIMLAPI-Partner-ID']).toMatch(/^part_[A-Za-z0-9]{1,64}$/);
-    expect(headers['X-AIMLAPI-Source']).toMatch(
-      /^(web|agent|mcp)\/[a-z0-9-]{1,32}$/
-    );
-    // HTTP-Referer / X-Title identify Eigent, not the vendor.
-    expect(headers['HTTP-Referer']).toBe('https://github.com/eigent-ai/eigent');
-    expect(headers['X-Title']).toBe('Eigent');
-  });
-
-  it('never attaches attribution to another vendor or a look-alike host', () => {
-    expect(
-      attributionHeadersForUrl('https://openrouter.ai/api/v1/models')
-    ).toEqual({});
-    expect(
-      attributionHeadersForUrl('https://api.aimlapi.com.evil.test/models')
-    ).toEqual({});
-    expect(
-      attributionHeadersForUrl('https://proxy.example.com/api.aimlapi.com')
-    ).toEqual({});
-    expect(attributionHeadersForUrl('not a url')).toEqual({});
-  });
-
-  it('returns a fresh object so the shared table cannot be mutated', () => {
-    const first = attributionHeadersForUrl('https://api.aimlapi.com/models');
-    first['X-AIMLAPI-Partner-ID'] = 'mutated';
-
-    const second = attributionHeadersForUrl('https://api.aimlapi.com/models');
-    expect(second['X-AIMLAPI-Partner-ID']).not.toBe('mutated');
+  it('can fetch models after a rejected key is corrected', async () => {
+    mocks.fetchPost
+      .mockRejectedValueOnce(
+        Object.assign(new Error('backend error'), { status: 401 })
+      )
+      .mockResolvedValueOnce({ data: [{ id: 'ling-chat' }] });
+    await expect(
+      fetchProviderModels('https://example.com/v1', '/models', 'bad-key')
+    ).rejects.toThrow('Invalid API key');
+    await expect(
+      fetchProviderModels('https://example.com/v1', '/models', 'new-key')
+    ).resolves.toMatchObject([{ models: [{ id: 'ling-chat' }] }]);
+    expect(mocks.fetchPost).toHaveBeenLastCalledWith('/model/list', {
+      api_host: 'https://example.com/v1',
+      models_endpoint: '/models',
+      api_key: 'new-key',
+    });
   });
 });
 
-describe('fetchProviderModels', () => {
-  it('attaches attribution alongside the caller headers for aimlapi.com', async () => {
-    const fetchMock = mockModelsResponse([]);
-
-    await fetchProviderModels('https://api.aimlapi.com/v1', '/models', 'k');
-
-    const headers = (fetchMock.mock.calls[0] as any)[1].headers;
-    expect(headers.Authorization).toBe('Bearer k');
-    expect(headers.Accept).toBe('application/json');
-    expect(headers['X-AIMLAPI-Source']).toBe('agent/eigent');
-  });
-
-  it('leaves other providers request headers untouched', async () => {
-    const fetchMock = mockModelsResponse([]);
-
-    await fetchProviderModels('https://openrouter.ai/api/v1', '/models', 'k');
-
-    const headers = (fetchMock.mock.calls[0] as any)[1].headers;
-    expect(Object.keys(headers).sort()).toEqual(['Accept', 'Authorization']);
-  });
-
+describe('fetchProviderModels filtering', () => {
   it('keeps text-in / text-out models from a `modalities` listing', async () => {
-    mockModelsResponse([
+    mocks.fetchPost.mockResolvedValue({ data: [
       {
         id: 'openai/gpt-4o-mini',
         modalities: { input: ['image', 'text'], output: ['text'] },
@@ -108,7 +81,7 @@ describe('fetchProviderModels', () => {
         id: 'deepgram/nova-3',
         modalities: { input: ['audio'], output: ['text'] },
       },
-    ]);
+    ] });
 
     const groups = await fetchProviderModels(
       'https://api.aimlapi.com/v1',
@@ -122,7 +95,7 @@ describe('fetchProviderModels', () => {
   });
 
   it('lists an id once when the listing repeats it', async () => {
-    mockModelsResponse([
+    mocks.fetchPost.mockResolvedValue({ data: [
       {
         id: 'anthropic/claude-sonnet-4.5',
         type: 'openai/chat-completions',
@@ -133,7 +106,7 @@ describe('fetchProviderModels', () => {
         type: 'openai/chat-completions',
         modalities: { input: ['text'], output: ['text'] },
       },
-    ]);
+    ] });
 
     const groups = await fetchProviderModels(
       'https://api.aimlapi.com/v1',
@@ -146,7 +119,7 @@ describe('fetchProviderModels', () => {
   });
 
   it('drops a model published only behind a non-chat endpoint surface', async () => {
-    mockModelsResponse([
+    mocks.fetchPost.mockResolvedValue({ data: [
       // Responses-API only. Verified live 2026-09-03: a /chat/completions
       // call for this id answers 404 "Model not found", so offering it in
       // the dropdown hands the user an id that cannot work.
@@ -184,7 +157,7 @@ describe('fetchProviderModels', () => {
         type: 'openai/embeddings',
         modalities: { input: ['text'], output: ['text'] },
       },
-    ]);
+    ] });
 
     const groups = await fetchProviderModels(
       'https://api.aimlapi.com/v1',
@@ -204,7 +177,7 @@ describe('fetchProviderModels', () => {
   it('ignores a `type` that is not an endpoint surface name', async () => {
     // A single-word `type` is not the `<family>/<endpoint>` surface shape,
     // so it must not be read as one and must not filter anything out.
-    mockModelsResponse([{ id: 'some-model', type: 'model' }]);
+    mocks.fetchPost.mockResolvedValue({ data: [{ id: 'some-model', type: 'model' }] });
 
     const groups = await fetchProviderModels(
       'https://api.tokenfactory.nebius.com/v1',
@@ -218,7 +191,7 @@ describe('fetchProviderModels', () => {
   });
 
   it('still keeps listings that publish no modality metadata at all', async () => {
-    mockModelsResponse([{ id: 'deepseek-reasoner' }]);
+    mocks.fetchPost.mockResolvedValue({ data: [{ id: 'deepseek-reasoner' }] });
 
     const groups = await fetchProviderModels(
       'https://api.tokenfactory.nebius.com/v1',
